@@ -1,10 +1,10 @@
 # Requirements:
 
 lxml:
-	> pip install lxml
+> pip install lxml
 	
 bz2file:
-	> pip install bz2file
+> pip install bz2file
 
 # Usage:
 
