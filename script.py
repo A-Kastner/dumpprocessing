@@ -12,7 +12,7 @@ import time
 FILENAME_CSV = "categorylinkspage-join.csv"
 FILENAME_ARTICLES_XML = "enwiki-20190101-pages-articles-multistream.xml"
 wantedCategory = "Computer_hardware"
-maxDepth = 5
+maxDepth = 10
 
 # Create paths
 RESOURCES_PATH = os.path.join(os.path.abspath(os.path.dirname(__file__)),
@@ -29,16 +29,15 @@ if not os.path.isdir(OUTPUT_PATH):
     else:
         print("Successfully created directories %s" % OUTPUT_PATH)
 
-# Set full input file paths
+# Set input file paths
 INPUT_FILEPATH_CSV_DUMP = os.path.join(RESOURCES_PATH, FILENAME_CSV)
-INPUT_FILEPATH_ARTICLES_XML_BZ2 = os.path.join(RESOURCES_PATH, FILENAME_ARTICLES_XML)
+INPUT_FILEPATH_ARTICLES_XML_BZ2 = os.path.join(RESOURCES_PATH,
+                                               FILENAME_ARTICLES_XML)
 
-# Set output file paths
-FILEPATH_CATEGORYLINKS_JSON_FILE = os.path.join(RESOURCES_PATH, "categories-" +
-                                            FILENAME_CSV.split(".")[
-                                                0] + ".json")
-FILEPATH_ARTICLES_ID_CAT_CSV_FILE = os.path.join(RESOURCES_PATH,
-                                             "articles-" + FILENAME_CSV)
+# Set filenames for processed .csv dump files
+FILENAME_CATEGORYLINKS_JSON = "categories_" + FILENAME_CSV.split(".")[0] + \
+                              ".json"
+FILENAME_ARTICLES_ID_CAT_CSV = "articles_" + FILENAME_CSV + ".csv"
 
 
 def printTime(start, end):
@@ -54,7 +53,6 @@ regexps_dict = {
     '&(amp;)?#([a-zA-Z0-9]*);': ""
 }
 
-
 regexp_title = re.compile('[^\w\s-]')
 
 
@@ -69,25 +67,24 @@ def clean_text(text, regexps_dict):
     return text.encode('ascii', 'ignore')
 
 
-def save_as_csv(dict, output_path):
-    with open(output_path + ".csv", "w", encoding="latin-1") as csv_file:
+def save_as_csv(dict, filepath):
+    with open(filepath, "w", encoding="latin-1") as csv_file:
         csvwriter = csv.writer(csv_file, delimiter=",", lineterminator="\n",
                                quoting=csv.QUOTE_ALL)
         for k, vs in dict.items():
             if not isinstance(vs, (list,)):
                 vs = [vs]
             csvwriter.writerow([k] + vs)
-        print("%s saved." % output_path)
+        print("%s saved." % filepath)
 
 
-def save_as_json(dict, output_path):
-    with open(output_path + ".json", "w", encoding="utf-8") as f:
+def save_as_json(dict, filepath):
+    with open(filepath, "w", encoding="utf-8") as f:
         json.dump(dict, f)
-        print("%s saved." % output_path)
+        print("%s saved." % filepath)
 
 
-def csvdump_extractor(inputfile_csv, outputfile_articles_csv,
-                      outputfile_categories_json):
+def csvdump_extractor(inputfile_csv, outputfile_articles_csv):
     print(
         "Extracting all categories and articles from %s\n..." % inputfile_csv)
     start = time.time()
@@ -121,7 +118,7 @@ def csvdump_extractor(inputfile_csv, outputfile_articles_csv,
             end = time.time()
             printTime(start, end)
             print("%s saved." % outputfile_articles_csv)
-            save_as_json(category_to_subcategory, outputfile_categories_json)
+            return category_to_subcategory
     except FileNotFoundError as e:
         print("Inputfile not found:", inputfile_csv)
         raise e
@@ -139,9 +136,9 @@ def getcategorydepths(cat_to_subcats, wantedcategory, maxdepth):
     while not queue.empty():
         (d, category) = queue.get()
         if d >= maxdepth:
-#            print(
-#                "Maximum depth %s reached. Next subcategory in queue: \'%s\'" % (
-#                    d, category))
+            #            print(
+            #                "Maximum depth %s reached. Next subcategory in queue: \'%s\'" % (
+            #                    d, category))
             break
         try:
             subcategories = cat_to_subcats[category]
@@ -175,7 +172,7 @@ def collectArticleIds(path, cat_to_depth):
         with open(path, "r", encoding="latin-1") as csv_file:
             dialect = csv.Sniffer().sniff(csv_file.read(1024))
             dialect.escapechar = "\\"
-            #dialect.quotechar = "|"
+            # dialect.quotechar = "|"
             dialect.quoting = csv.QUOTE_MINIMAL
             csv_file.seek(0)
             reader = csv.reader(csv_file, dialect)
@@ -250,21 +247,21 @@ def articlecollector(path_articles_xml, outpath_articles, articleids):
         with BZ2File(outpath_articles, "w", compresslevel=9) as file, \
                 etree.xmlfile(file, encoding="utf-8") as newfile, \
                 newfile.element("mediawiki",
-                                     xmlns=Header):
-                    context = etree.iterparse(path_articles_xml,
-                                              events=("end",),
-                                              tag={Tnamespaces, Tpage})
-                    for action, elem in context:
-                        if elem.tag == Tpage and id_path(elem)[
-                            0].text in articleids:
-                            create_page(elem, title_path, id_path, text_path,
-                                        articleids, newfile)
-                            extracted_count += 1
-                        elif elem.tag == Tnamespaces:
-                            create_namespace(elem, newfile)
-                        elem.clear()
-                        while elem.getprevious() is not None:
-                            del elem.getparent()[0]
+                                xmlns=Header):
+            context = etree.iterparse(path_articles_xml,
+                                      events=("end",),
+                                      tag={Tnamespaces, Tpage})
+            for action, elem in context:
+                if elem.tag == Tpage and id_path(elem)[
+                    0].text in articleids:
+                    create_page(elem, title_path, id_path, text_path,
+                                articleids, newfile)
+                    extracted_count += 1
+                elif elem.tag == Tnamespaces:
+                    create_namespace(elem, newfile)
+                elem.clear()
+                while elem.getprevious() is not None:
+                    del elem.getparent()[0]
     except FileNotFoundError as e:
         print(e.filename, "not found")
         raise e
@@ -274,17 +271,21 @@ def articlecollector(path_articles_xml, outpath_articles, articleids):
 
 
 def main():
-    # Extract relevant information from .csv dump
-    if not (os.path.isfile(FILEPATH_ARTICLES_ID_CAT_CSV_FILE) and
+    FILEPATH_ARTICLES_ID_CAT_CSV = os.path.join(RESOURCES_PATH,
+                                                FILENAME_ARTICLES_ID_CAT_CSV)
+    FILEPATH_CATEGORYLINKS_JSON = os.path.join(RESOURCES_PATH,
+                                               FILENAME_CATEGORYLINKS_JSON)
+    # Extract relevant information from .csv dump if neccessary,
+    # otherwise load category to subcategory dict
+    if not (os.path.isfile(FILEPATH_ARTICLES_ID_CAT_CSV) and
             os.path.isfile(
-            FILEPATH_CATEGORYLINKS_JSON_FILE)):
-        csvdump_extractor(INPUT_FILEPATH_CSV_DUMP,
-                          FILEPATH_ARTICLES_ID_CAT_CSV_FILE,
-                          FILEPATH_CATEGORYLINKS_JSON_FILE)
-
-    # Load category to subcategory dict
-    with open(FILEPATH_CATEGORYLINKS_JSON_FILE, "r") as f:
-        cat_to_subcats_full = json.load(f)
+                FILEPATH_CATEGORYLINKS_JSON)):
+        cat_to_subcats_full = csvdump_extractor(INPUT_FILEPATH_CSV_DUMP,
+                                                FILEPATH_ARTICLES_ID_CAT_CSV)
+        save_as_json(cat_to_subcats_full, FILEPATH_CATEGORYLINKS_JSON)
+    else:
+        with open(FILEPATH_CATEGORYLINKS_JSON, "r") as f:
+            cat_to_subcats_full = json.load(f)
 
     # For a given starting category and maximum depth get all subcategories
     # and their depth
@@ -292,28 +293,29 @@ def main():
         wantedCategory),
                                      maxDepth)
     filepath_cat_to_depth = os.path.join(OUTPUT_PATH,
-                                      wantedCategory.replace(" ", "_")
-                                      + "_category_to_depth-d" + str(maxDepth))
-    #save_as_json(cat_to_depth, filepath_cat_to_depth)
-    save_as_csv(cat_to_depth, filepath_cat_to_depth)
+                                         wantedCategory.replace(" ", "_")
+                                         + "_category_to_depth-d" + str(
+                                             maxDepth))
+    # save_as_json(cat_to_depth, filepath_cat_to_depth + ".json")
+    save_as_csv(cat_to_depth, filepath_cat_to_depth + ".csv")
 
     cat_to_subcats = getsubcats(cat_to_subcats_full, cat_to_depth)
     filepath_cat_to_subcat = os.path.join(OUTPUT_PATH,
-                                      wantedCategory.replace(" ", "_")
-                                      + "_categorylinks-d" + str(maxDepth))
-    #save_as_json(cat_to_subcats, filepath_cat_to_subcat)
-    save_as_csv(cat_to_subcats, filepath_cat_to_subcat)
+                                          wantedCategory.replace(" ", "_")
+                                          + "_categorylinks-d" + str(maxDepth))
+    # save_as_json(cat_to_subcats, filepath_cat_to_subcat + ".json")
+    save_as_csv(cat_to_subcats, filepath_cat_to_subcat + ".csv")
 
     # Collect article ids for collected categories
     filepath_cat_to_artids = os.path.join(OUTPUT_PATH,
-                                      wantedCategory.replace(" ", "_")
-                                      + "_category_to_articleids-d" + str(
-                                          maxDepth))
+                                          wantedCategory.replace(" ", "_")
+                                          + "_category_to_articleids-d" + str(
+                                              maxDepth))
     if not os.path.isfile(filepath_cat_to_artids + ".json"):
-        cat_to_articleids = collectArticleIds(FILEPATH_ARTICLES_ID_CAT_CSV_FILE,
+        cat_to_articleids = collectArticleIds(FILEPATH_ARTICLES_ID_CAT_CSV,
                                               cat_to_depth)
-        save_as_json(cat_to_articleids, filepath_cat_to_artids)
-        save_as_csv(cat_to_articleids, filepath_cat_to_artids)
+        save_as_json(cat_to_articleids, filepath_cat_to_artids + ".json")
+        save_as_csv(cat_to_articleids, filepath_cat_to_artids + ".csv")
     else:
         with open(filepath_cat_to_artids + ".json", "r") as f:
             print("Loading article ids")
@@ -331,12 +333,12 @@ def main():
 
     # Copy relevant articles from XML file into a new XML file
     filepath_articles_xml_bz2 = os.path.join(OUTPUT_PATH,
-                                          wantedCategory.replace(" ",
-                                                                 "_") +
-                                          "_articles-d"
-                                          + str(maxDepth) + ".xml.bz2")
+                                             wantedCategory.replace(" ",
+                                                                    "_") +
+                                             "_articles-d"
+                                             + str(maxDepth) + ".xml.bz2")
     extracted_count = articlecollector(INPUT_FILEPATH_ARTICLES_XML_BZ2,
-                      filepath_articles_xml_bz2, articleids)
+                                       filepath_articles_xml_bz2, articleids)
 
     print("%s category-articleID pairs found" % catid_pair_count)
     print("%s unique articleIDs found" % len(articleids))
