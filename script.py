@@ -12,31 +12,32 @@ import time
 FILENAME_CSV = "categorylinkspage-join.csv"
 FILENAME_ARTICLES_XML = "enwiki-20190101-pages-articles-multistream.xml"
 wantedCategory = "Computer_hardware"
-maxDepth = 3
+maxDepth = 5
 
 # Create paths
 RESOURCES_PATH = os.path.join(os.path.abspath(os.path.dirname(__file__)),
                               "resources")
 OUTPUT_PATH = os.path.join(os.path.abspath(os.path.dirname(__file__)),
-                           "output")
+                           "output", wantedCategory.replace(" ", "_") +
+                           "-d" + str(maxDepth))
 
 if not os.path.isdir(OUTPUT_PATH):
     try:
-        os.mkdir(OUTPUT_PATH)
+        os.makedirs(OUTPUT_PATH)
     except OSError:
-        print("Creating of directory %s failed" % OUTPUT_PATH)
+        print("Creating directories %s failed" % OUTPUT_PATH)
     else:
-        print("Successfully created the directory %s" % OUTPUT_PATH)
+        print("Successfully created directories %s" % OUTPUT_PATH)
 
 # Set full input file paths
 INPUT_FILEPATH_CSV_DUMP = os.path.join(RESOURCES_PATH, FILENAME_CSV)
 INPUT_FILEPATH_ARTICLES_XML_BZ2 = os.path.join(RESOURCES_PATH, FILENAME_ARTICLES_XML)
 
 # Set output file paths
-PATH_CATEGORYLINKS_JSON_FILE = os.path.join(RESOURCES_PATH, "categories-" +
+FILEPATH_CATEGORYLINKS_JSON_FILE = os.path.join(RESOURCES_PATH, "categories-" +
                                             FILENAME_CSV.split(".")[
                                                 0] + ".json")
-PATH_ARTICLES_ID_CAT_CSV_FILE = os.path.join(RESOURCES_PATH,
+FILEPATH_ARTICLES_ID_CAT_CSV_FILE = os.path.join(RESOURCES_PATH,
                                              "articles-" + FILENAME_CSV)
 
 
@@ -53,7 +54,9 @@ regexps_dict = {
     '&(amp;)?#([a-zA-Z0-9]*);': ""
 }
 
+
 regexp_title = re.compile('[^\w\s-]')
+
 
 def normalize(str):
     # return re.sub(regexp_title, "", str).replace("_"," ")
@@ -222,7 +225,7 @@ def create_page(elem, title_path, id_path, text_path, articleids, newfile):
     create_subelem(newpage, "title", title)
     create_subelem(newpage, "id", id)
     create_subelem(etree.SubElement(newpage, "revision"), "text", text)
-    newfile.write(newpage)#, pretty_print=True)
+    newfile.write(newpage, pretty_print=True)
 
 
 def create_namespace(elem, newfile):
@@ -232,7 +235,7 @@ def create_namespace(elem, newfile):
             nc = create_subelem(newnamespaces, "namespace", child.text)
             for k, v in child.attrib.items():
                 nc.attrib[k] = v
-        newfile.write(newnamespaces)#, pretty_print=True)
+        newfile.write(newnamespaces, pretty_print=True)
 
 
 def articlecollector(path_articles_xml, outpath_articles, articleids):
@@ -241,34 +244,43 @@ def articlecollector(path_articles_xml, outpath_articles, articleids):
     title_path = etree.ETXPath("child::" + Ttitle)
     id_path = etree.ETXPath("child::" + Tid)
     text_path = etree.ETXPath("child::" + Trev + "/" + Ttext)
+    extracted_count = 0
     start = time.time()
-    with BZ2File(outpath_articles, "w", compresslevel=9) as file:
-        context = etree.iterparse(path_articles_xml, events=("end",),
-                                  tag={Tnamespaces, Tpage})
-        with etree.xmlfile(file, encoding="utf-8") as newfile:
-            #newfile.write_declaration(standalone=True)
-            with newfile.element("mediawiki",
-                                 xmlns=Header):
-                for action, elem in context:
-                    if elem.tag == Tpage and id_path(elem)[
-                        0].text in articleids:
-                        create_page(elem, title_path, id_path, text_path,
-                                    articleids, newfile)
-                    elif elem.tag == Tnamespaces:
-                        create_namespace(elem, newfile)
-                    elem.clear()
-                    while elem.getprevious() is not None:
-                        del elem.getparent()[0]
+    try:
+        with BZ2File(outpath_articles, "w", compresslevel=9) as file, \
+                etree.xmlfile(file, encoding="utf-8") as newfile, \
+                newfile.element("mediawiki",
+                                     xmlns=Header):
+                    context = etree.iterparse(path_articles_xml,
+                                              events=("end",),
+                                              tag={Tnamespaces, Tpage})
+                    for action, elem in context:
+                        if elem.tag == Tpage and id_path(elem)[
+                            0].text in articleids:
+                            create_page(elem, title_path, id_path, text_path,
+                                        articleids, newfile)
+                            extracted_count += 1
+                        elif elem.tag == Tnamespaces:
+                            create_namespace(elem, newfile)
+                        elem.clear()
+                        while elem.getprevious() is not None:
+                            del elem.getparent()[0]
+    except FileNotFoundError as e:
+        print(e.filename, "not found")
+        raise e
     end = time.time()
     printTime(start, end)
+    return extracted_count
 
 
 def main():
-    # Extract relevant information from .csv dump (if needed)
-    if not (os.path.isfile(PATH_ARTICLES_ID_CAT_CSV_FILE) and os.path.isfile(
-            PATH_CATEGORYLINKS_JSON_FILE)):
-        csvdump_extractor(INPUT_FILEPATH_CSV_DUMP, PATH_ARTICLES_ID_CAT_CSV_FILE,
-                          PATH_CATEGORYLINKS_JSON_FILE)
+    # Extract relevant information from .csv dump
+    if not (os.path.isfile(FILEPATH_ARTICLES_ID_CAT_CSV_FILE) and
+            os.path.isfile(
+            FILEPATH_CATEGORYLINKS_JSON_FILE)):
+        csvdump_extractor(INPUT_FILEPATH_CSV_DUMP,
+                          FILEPATH_ARTICLES_ID_CAT_CSV_FILE,
+                          FILEPATH_CATEGORYLINKS_JSON_FILE)
 
     # Load category to subcategory dict
     with open(FILEPATH_CATEGORYLINKS_JSON_FILE, "r") as f:
@@ -282,23 +294,22 @@ def main():
     filepath_cat_to_depth = os.path.join(OUTPUT_PATH,
                                       wantedCategory.replace(" ", "_")
                                       + "_category_to_depth-d" + str(maxDepth))
-    save_as_json(cat_to_depth, filepath_cat_to_depth)
+    #save_as_json(cat_to_depth, filepath_cat_to_depth)
     save_as_csv(cat_to_depth, filepath_cat_to_depth)
 
     cat_to_subcats = getsubcats(cat_to_subcats_full, cat_to_depth)
     filepath_cat_to_subcat = os.path.join(OUTPUT_PATH,
                                       wantedCategory.replace(" ", "_")
                                       + "_categorylinks-d" + str(maxDepth))
-    save_as_json(cat_to_subcats, filepath_cat_to_subcat)
+    #save_as_json(cat_to_subcats, filepath_cat_to_subcat)
     save_as_csv(cat_to_subcats, filepath_cat_to_subcat)
 
-    # Collect article ids collected categories
+    # Collect article ids for collected categories
     filepath_cat_to_artids = os.path.join(OUTPUT_PATH,
                                       wantedCategory.replace(" ", "_")
                                       + "_category_to_articleids-d" + str(
                                           maxDepth))
     if not os.path.isfile(filepath_cat_to_artids + ".json"):
-        print("Collecting articleids")
         cat_to_articleids = collectArticleIds(FILEPATH_ARTICLES_ID_CAT_CSV_FILE,
                                               cat_to_depth)
         save_as_json(cat_to_articleids, filepath_cat_to_artids)
@@ -311,22 +322,25 @@ def main():
     cat_to_subcats.clear()
 
     articleids = set()
-    count = 0
+    catid_pair_count = 0
     for cat, ids in cat_to_articleids.items():
         for id in ids:
-            count += 1
+            catid_pair_count += 1
             articleids.add(id)
     cat_to_articleids.clear()
-    print("%s Category-articleID pairs found" % count)
-    print("%s unique articleIDs" % len(articleids))
 
-    # Extract articles from XML file
+    # Copy relevant articles from XML file into a new XML file
     filepath_articles_xml_bz2 = os.path.join(OUTPUT_PATH,
                                           wantedCategory.replace(" ",
                                                                  "_") +
                                           "_articles-d"
                                           + str(maxDepth) + ".xml.bz2")
-    articlecollector(INPUT_FILEPATH_ARTICLES_XML_BZ2, filepath_articles_xml_bz2, articleids)
+    extracted_count = articlecollector(INPUT_FILEPATH_ARTICLES_XML_BZ2,
+                      filepath_articles_xml_bz2, articleids)
+
+    print("%s category-articleID pairs found" % catid_pair_count)
+    print("%s unique articleIDs found" % len(articleids))
+    print("%s matching articles extracted" % extracted_count)
 
 
 if __name__ == "__main__":
