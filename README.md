@@ -1,14 +1,14 @@
 # Prerequisites
 
-* A .csv dump of the join between categorylinks and page, e.g.:
+A .csv dump of the join between categorylinks and page, e.g.:
 > SELECT * FROM page JOIN categorylinks ON categorylinks.cl_from = page.page_id INTO OUTFILE 'E:/wikidumps/categorylinkspage-join.csv' FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED BY '"' LINES TERMINATED BY '\n'
 
-* The article dump, e.g. enwiki-20190101-pages-articles-multistream.xml
+The article dump, e.g. enwiki-20190101-pages-articles-multistream.xml
 
-* lxml:
+lxml:
 > pip install lxml
 	
-* bz2file:
+bz2file:
 > pip install bz2file
 
 # Usage:
